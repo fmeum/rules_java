@@ -1,0 +1,56 @@
+name: BCR Dependency Cacher
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Run daily at midnight UTC
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  cache_dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # To commit and push dirhash files
+      actions: read # To read workflow status/logs (optional but good practice)
+    steps:
+      - name: Checkout rules_java repository
+        uses: actions/checkout@v4
+        with:
+          path: rules_java # Checkout current repo into 'rules_java' subdirectory
+
+      - name: Checkout Bazel Central Registry
+        uses: actions/checkout@v4
+        with:
+          repository: bazelbuild/bazel-central-registry
+          path: bazel-central-registry # Checkout BCR into 'bazel-central-registry' subdirectory
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run caching script
+        id: caching_script # Give an id to access outputs if needed later
+        working-directory: rules_java # Ensure script runs from within rules_java checkout
+        run: python .github/scripts/cache_bcr_modules.py # Path relative to rules_java
+
+      - name: Commit and push dirhash files
+        working-directory: rules_java # Ensure git commands run from within rules_java checkout
+        run: |
+          git config --global user.name 'BCR Dependency Cache Bot'
+          git config --global user.email 'actions@github.com' # Or a dedicated bot email
+          # Check if there are any changes to commit
+          if ! git diff --quiet HEAD .github/bcr_dirhashes/; then
+            echo "Changes detected in .github/bcr_dirhashes/, committing..."
+            git add .github/bcr_dirhashes/
+            git commit -m "Update BCR dependency dirhashes
+
+          [skip ci] Cache results from BCR Dependency Cacher workflow."
+            git push
+          else
+            echo "No changes to commit in .github/bcr_dirhashes/."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
